@@ -3,9 +3,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 import math
 from torch_geometric.nn import GCNConv
-from torch_geometric.data import Data
+from torch_geometric.data import DataLoader
+from torch_geometric.utils import to_dense_adj
 
-# Modificado para incluir um módulo de detecção de subgrafos completos
 class SubgraphDetectorModule(nn.Module):
     def __init__(self, embed_dim, k):
         super(SubgraphDetectorModule, self).__init__()
@@ -16,6 +16,7 @@ class SubgraphDetectorModule(nn.Module):
         # Suponha que x contém embeddings dos nós e edge_index contém as arestas
         # Detectar subgrafos completos K_(k+1)
         # Simplificação: apenas uma camada linear para determinar a presença
+        x = x.mean(dim=0, keepdim=True)  # Simples média dos embeddings
         subgraph_scores = self.fc(x)
         return subgraph_scores
 
@@ -173,28 +174,36 @@ class TransNAR_GCN(nn.Module):
             torch.save(self.state_dict(), f'transnar_gcn_checkpoint_epoch_{epoch+1}.pth')
 
 # Exemplo de uso
-input_dim = 100
-output_dim = 50
+input_dim = 1  # Ajustado para as características dos nós gerados
+output_dim = 1  # Ajustado para a saída desejada
 embed_dim = 256
 num_heads = 8
 num_layers = 6
 ffn_dim = 1024
 gcn_hidden_dim = 128
 gcn_out_dim = 256
-k = 3  # Para detectar subgrafos completos K_(k+1), com k = 3 é K_4
+k = 4  # Para detectar subgrafos completos K_(k+1), com k = 4 é K_5
 
 model = TransNAR_GCN(input_dim, output_dim, embed_dim, num_heads, num_layers, ffn_dim, gcn_hidden_dim, gcn_out_dim, k)
-input_data = torch.randn(32, 100, input_dim)
-edge_index = torch.randint(0, 32, (2, 160))  # Exemplo de índice de arestas mais complexo
 
-class ExampleBatch:
-    def __init__(self, x, edge_index, y):
-        self.x = x
-        self.edge_index = edge_index
-        self.y = y
+# Carregar dados gerados
+graphs_with_k_clique = torch.load('graphs_with_k_clique.pt')
+graphs_without_k_clique = torch.load('graphs_without_k_clique.pt')
 
-train_loader = [ExampleBatch(input_data, edge_index, torch.randn(32, 100, output_dim))]
-val_loader = [ExampleBatch(input_data, edge_index, torch.randn(32, 100, output_dim))]
+# Adiciona rótulos para os dados (1 para presença de K_(k+1), 0 para ausência)
+for data in graphs_with_k_clique:
+    data.y = torch.tensor([1], dtype=torch.float)
+
+for data in graphs_without_k_clique:
+    data.y = torch.tensor([0], dtype=torch.float)
+
+# Criar DataLoader
+train_data = graphs_with_k_clique + graphs_without_k_clique
+train_loader = DataLoader(train_data, batch_size=32, shuffle=True)
+
+# Simulando um conjunto de dados de validação
+val_data = graphs_with_k_clique[:100] + graphs_without_k_clique[:100]
+val_loader = DataLoader(val_data, batch_size=32, shuffle=False)
 
 # Treinamento do modelo
 model.train_model(train_loader, val_loader, num_epochs=100)
